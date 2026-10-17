@@ -1,0 +1,431 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\title{Curling Experiment Design}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+
+This document describes the benchmark plan for evaluating Curling's
+control-plane/data-plane separation.  Curling decouples request admission from
+private-side execution by placing a queue between the API service and the
+private executor.  The executor can either process requests one by one or apply
+batch scheduling with artifact reuse.  The experiments compare this decoupled
+design against coupled baselines in which the API waits for private-side work to
+finish synchronously.
+
+The benchmark uses fixed traces generated from workload configuration files.
+Each execution mode receives the same request sequence, object size mix, and
+request priority distribution.  This makes the comparison focus on execution
+mode behavior rather than trace randomness.
+
+\section{Main Questions}
+
+The experiments are designed to answer the following questions.
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{What is the overhead of decoupling?}
+  When reuse is disabled, how much latency or throughput cost does the queue
+  introduce compared with coupled synchronous baselines?
+
+  \item \textbf{When does reuse pay off?}
+  Under read-heavy workloads with repeated targets, how much does decoupled
+  batch scheduling and artifact reuse improve completion latency, throughput,
+  and private-side execution work?
+
+  \item \textbf{How robust is the design across workload mixes?}
+  Does Curling remain competitive for mixed and write-heavy workloads where
+  reuse opportunities are weaker?
+
+  \item \textbf{How does load affect each mode?}
+  How do admission latency, completion latency, and throughput change as client
+  concurrency increases?
+
+  \item \textbf{How does object size affect performance?}
+  Do large objects amplify the benefit of reuse or the cost of synchronous data
+  movement through the API service?
+\end{enumerate}
+
+\section{Systems Under Test}
+
+The same deployment is configured in one mode at a time.  Object storage is
+used in all modes; the key difference is whether the API waits synchronously for
+private execution or enqueues the request for asynchronous execution.
+
+\begin{table}[h]
+\centering
+\caption{Execution modes and baselines.}
+\label{tab:modes}
+\begin{tabular}{llll}
+\toprule
+\textbf{Mode} & \textbf{API behavior} & \textbf{Private behavior} & \textbf{Reuse} \\
+\midrule
+Coupled RPC baseline &
+Synchronous RPC call &
+Executor runs request immediately &
+No \\
+Coupled storage API baseline &
+Synchronous storage API access &
+Storage service reads/writes files &
+No \\
+Decoupled baseline &
+Enqueue request &
+Queue worker runs requests one by one &
+No \\
+Decoupled reuse &
+Enqueue request &
+Batch scheduler with artifact reuse &
+Yes \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Baseline Rationale}
+
+\textbf{Coupled RPC baseline.}
+This baseline represents a tightly coupled design where the API service calls a
+private executor directly and waits for the request to finish.  It avoids queue
+overhead but exposes the API to private-side execution latency.
+
+\textbf{Coupled storage API baseline.}
+This baseline represents a coupled design where the private node exposes a
+storage API and the control-plane API mediates data movement.  It is useful for
+measuring the cost of moving data through the API service.
+
+\textbf{Decoupled baseline.}
+This mode keeps the queue-based architecture but disables reuse.  It isolates
+the cost and benefit of asynchronous decoupling from the benefit of reuse.
+
+\textbf{Decoupled reuse.}
+This is the full Curling design.  The executor polls pending requests in
+batches, first binds requests to non-expired artifacts when possible, then
+groups remaining read requests by reuse key.  The current reuse key is the read
+target.  Write requests are scheduled as single-request execution units.  Units
+are ordered by scheduling score; the current implementation primarily uses
+request priority.
+
+\section{Workloads}
+
+Workloads are defined as JSON files under \texttt{experiments/workloads/}.
+The dataset generator reads a workload file and emits a trace JSON file plus
+metadata.  The private node materializes read targets from the trace, while the
+client node materializes write input files from the same trace.
+
+\begin{table}[h]
+\centering
+\caption{Default workload presets.}
+\label{tab:workloads}
+\begin{tabular}{lllll}
+\toprule
+\textbf{Workload} & \textbf{Read/write mix} & \textbf{Read targets} &
+\textbf{Repeat mode} & \textbf{Purpose} \\
+\midrule
+\texttt{read-heavy-reuse} &
+90\% read, 10\% write &
+10 &
+Zipf, $\alpha=1.2$ &
+Highlight artifact reuse \\
+\texttt{mixed} &
+50\% read, 50\% write &
+100 &
+Zipf, $\alpha=0.8$ &
+Model normal exchange traffic \\
+\texttt{write-heavy-no-reuse} &
+10\% read, 90\% write &
+100 &
+Unique &
+Measure decoupling when reuse is weak \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Object Size Distribution}
+
+Each request is assigned an object size label.  The default profile is shown in
+Table~\ref{tab:sizes}.  Unless otherwise stated, experiments use the default
+mix: 70\% small, 20\% medium, and 10\% large.
+
+\begin{table}[h]
+\centering
+\caption{Default object size profile.}
+\label{tab:sizes}
+\begin{tabular}{lll}
+\toprule
+\textbf{Label} & \textbf{Bytes} & \textbf{Default ratio} \\
+\midrule
+Small & 1,024 & 0.7 \\
+Medium & 1,048,576 & 0.2 \\
+Large & 10,485,760 & 0.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Priority Policies}
+
+The trace records a priority for every request.  The default policy is
+\texttt{uniform}, where all requests have priority 0.  A second policy,
+\texttt{small-first}, can assign higher priority to smaller objects, for
+example small:2, medium:1, large:0.  Priority experiments should use the same
+trace across all modes so that only scheduling behavior differs.
+
+\section{Metrics}
+
+The benchmark records per-request and aggregate metrics.
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Admission latency}: time spent by the submit call.
+  \item \textbf{Completion latency}: time from submit start to final state.
+  \item \textbf{Operation latency}: full client-side operation latency,
+  including staged upload for writes.
+  \item \textbf{Throughput}: successfully completed requests per second.
+  \item \textbf{Final state distribution}: number of requests ending in states
+  such as released, committed, failed, or timed out.
+  \item \textbf{Mode-specific behavior}: artifact reuse hits, queue delay, and
+  execution-unit batching should be collected from logs or future counters when
+  available.
+\end{itemize}
+
+Latency should be reported with at least median, p95, and p99.  Results should
+also separate read and write requests because the two paths exercise different
+parts of the system.
+
+\section{Experimental Parameters}
+
+The main sweep parameters are listed in Table~\ref{tab:params}.  A compact
+default matrix is sufficient for early runs; larger runs should increase request
+count and repeat each point multiple times.
+
+\begin{table}[h]
+\centering
+\caption{Benchmark parameters.}
+\label{tab:params}
+\begin{tabular}{lll}
+\toprule
+\textbf{Parameter} & \textbf{Default values} & \textbf{Reason} \\
+\midrule
+Execution mode &
+Four modes in Table~\ref{tab:modes} &
+Compare baselines and full design \\
+Workload &
+Three presets in Table~\ref{tab:workloads} &
+Cover reuse-heavy, mixed, and low-reuse cases \\
+Concurrency &
+1, 10, 50 &
+Measure behavior from light to high load \\
+Requests per run &
+1,000 default, larger for final runs &
+Balance stability and runtime \\
+Object size mix &
+70/20/10 small/medium/large &
+Represent heterogeneous object sizes \\
+Priority policy &
+Uniform, optional small-first &
+Evaluate scheduling sensitivity \\
+Random seed &
+Fixed per trace &
+Make modes comparable \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Experiment Matrix}
+
+\subsection{Experiment 1: Decoupling Overhead}
+
+\textbf{Purpose.}
+Measure the overhead introduced by queue-based decoupling when reuse is not the
+dominant factor.
+
+\textbf{Workload.}
+\texttt{write-heavy-no-reuse}.
+
+\textbf{Modes.}
+Coupled RPC baseline, coupled storage API baseline, and decoupled baseline.
+
+\textbf{Procedure.}
+Generate one fixed trace from \texttt{write\_heavy\_no\_reuse.json}.  Materialize
+private read files on the private node and write input files on the client node.
+Run the same trace for each mode at concurrency 1, 10, and 50.
+
+\textbf{Expected interpretation.}
+The gap between coupled RPC and decoupled baseline estimates queue and
+asynchronous execution overhead.  The gap between coupled RPC and coupled
+storage API estimates the cost of API-mediated data transfer.
+
+\subsection{Experiment 2: Reuse Benefit}
+
+\textbf{Purpose.}
+Quantify the benefit of artifact-level and intra-batch reuse.
+
+\textbf{Workload.}
+\texttt{read-heavy-reuse}.
+
+\textbf{Modes.}
+Decoupled baseline and decoupled reuse.  Coupled baselines may be included as
+additional references.
+
+\textbf{Procedure.}
+Generate one fixed read-heavy trace.  Run it against decoupled baseline and
+decoupled reuse at concurrency 1, 10, and 50.  Repeat with a larger request
+count if p95 and p99 latency are unstable.
+
+\textbf{Expected interpretation.}
+The full design should reduce private-side work and improve completion latency
+when many read requests share a small target set.  Admission latency may remain
+similar between the two decoupled modes because both use the API queue path.
+
+\subsection{Experiment 3: Mixed Workload Robustness}
+
+\textbf{Purpose.}
+Evaluate whether reuse scheduling helps under a more balanced read/write mix
+without harming write-heavy behavior.
+
+\textbf{Workload.}
+\texttt{mixed}.
+
+\textbf{Modes.}
+All four modes.
+
+\textbf{Procedure.}
+Generate one fixed mixed trace and run it at each concurrency level.  Report
+read and write latencies separately as well as aggregate throughput.
+
+\textbf{Expected interpretation.}
+The decoupled reuse mode may still benefit repeated reads, but writes should not
+be starved.  If write p95 or p99 latency grows substantially, the scheduling
+score or tenant budget policy needs adjustment.
+
+\subsection{Experiment 4: Object Size Sensitivity}
+
+\textbf{Purpose.}
+Determine whether benefits and overheads scale with object size.
+
+\textbf{Workload.}
+Use \texttt{read-heavy-reuse} and \texttt{write-heavy-no-reuse}; vary the object
+size mix.
+
+\textbf{Parameter sweep.}
+Run three mixes: small-only, balanced, and large-heavy.  For example:
+\texttt{small:1.0,medium:0,large:0},
+\texttt{small:0.7,medium:0.2,large:0.1}, and
+\texttt{small:0.2,medium:0.3,large:0.5}.
+
+\textbf{Expected interpretation.}
+Large objects should increase the cost of repeated data processing and data
+movement, making reuse more valuable in read-heavy workloads and making
+API-mediated transfer more expensive in coupled storage API mode.
+
+\subsection{Experiment 5: Priority Scheduling}
+
+\textbf{Purpose.}
+Check whether the scheduler can favor high-priority requests without severely
+hurting low-priority throughput.
+
+\textbf{Workload.}
+Use \texttt{mixed} or \texttt{read-heavy-reuse} with
+\texttt{priority\_policy=small-first}.
+
+\textbf{Modes.}
+Decoupled baseline and decoupled reuse.
+
+\textbf{Procedure.}
+Generate two traces from the same workload: one with uniform priority and one
+with small-first priority.  Compare latency by priority class and object size.
+
+\textbf{Expected interpretation.}
+In decoupled reuse mode, high-priority execution units should see lower latency.
+Low-priority requests should still make progress; otherwise tenant budgets or
+aging terms should be strengthened.
+
+\section{Execution Procedure}
+
+For each workload and parameter point, use the following procedure.
+
+\begin{enumerate}[leftmargin=*]
+  \item Generate a trace on the admin machine:
+\begin{verbatim}
+python experiments/benchmark/generate_dataset.py \
+  --role admin \
+  --workload-json experiments/workloads/read_heavy_reuse.json \
+  --output-dir experiments/benchmark/generated/read-heavy-reuse \
+  --seed 1
+\end{verbatim}
+
+  \item Materialize private read files on the private node:
+\begin{verbatim}
+python experiments/benchmark/generate_dataset.py \
+  --role private \
+  --trace-json experiments/benchmark/generated/read-heavy-reuse/read-heavy-reuse.trace.json \
+  --private-export-dir private-data/exports
+\end{verbatim}
+
+  \item Materialize client write input files on the client node:
+\begin{verbatim}
+python experiments/benchmark/generate_dataset.py \
+  --role client \
+  --trace-json experiments/benchmark/generated/read-heavy-reuse/read-heavy-reuse.trace.json \
+  --write-input-dir experiments/benchmark/generated/read-heavy-reuse/writes
+\end{verbatim}
+
+  \item Configure one execution mode in \texttt{inventory.env}, regenerate
+  environment files, and restart node1 and node3.
+
+  \item Run the benchmark with the generated trace:
+\begin{verbatim}
+bash deploy/scripts/run_benchmark.sh decoupled-reuse \
+  --trace-json experiments/benchmark/generated/read-heavy-reuse/read-heavy-reuse.trace.json \
+  --trace-base-dir experiments/benchmark/generated/read-heavy-reuse \
+  --concurrency 10
+\end{verbatim}
+
+  \item Save the CSV and summary JSON from
+  \texttt{experiments/benchmark/results/}.  Record the git commit, environment
+  configuration, node types, network placement, and start time.
+\end{enumerate}
+
+\section{Reporting}
+
+Each experiment should report:
+
+\begin{itemize}[leftmargin=*]
+  \item throughput by mode and concurrency;
+  \item admission, completion, and operation latency by mode;
+  \item read-only and write-only latency breakdowns;
+  \item p50, p95, and p99 latency;
+  \item final state counts and failure details;
+  \item for reuse experiments, artifact hit rate and average execution-unit
+  size when counters are available.
+\end{itemize}
+
+Plots should use the same y-axis scale when comparing modes within one
+experiment.  For latency plots, use log scale when tail latency spans more than
+one order of magnitude.
+
+\section{Validity Considerations}
+
+The following factors should be controlled or reported.
+
+\begin{itemize}[leftmargin=*]
+  \item Use the same trace for all modes in a comparison.
+  \item Warm up services before measuring, or report cold-start results
+  separately.
+  \item Clear or isolate artifacts between runs when measuring first-run reuse
+  behavior.
+  \item Keep object storage, database, and queue services configured identically
+  across modes.
+  \item Repeat final measurements at least three times and report mean and
+  variance.
+  \item Separate API admission latency from end-to-end completion latency,
+  because decoupled modes intentionally return earlier on admission.
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+set -a
+source "$ROOT_DIR/inventory.env"
+set +a
+MINIO_HOST="${NODE5_HOST:-$NODE2_HOST}"
+QUEUE_HOST="${NODE6_HOST:-$NODE2_HOST}"
+cat > "$ROOT_DIR/deploy/exchange/.env" <<EOF3
+MINIO_ROOT_USER=${MINIO_ROOT_USER}
+MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+MINIO_ENDPOINT=http://${MINIO_HOST}:${MINIO_PORT}
+ELASTICMQ_ENDPOINT=http://${QUEUE_HOST}:${ELASTICMQ_PORT}
+S3_BUCKET_STAGED=${S3_BUCKET_STAGED}
+S3_BUCKET_RELEASED=${S3_BUCKET_RELEASED}
+SQS_QUEUE_NAME=${SQS_QUEUE_NAME}
+AWS_REGION=${AWS_REGION}
+EOF3
+echo "Generated deploy/exchange/.env"

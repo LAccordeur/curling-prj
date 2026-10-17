@@ -1,0 +1,21 @@
+{
+  "name": "write-only",
+  "description": "100% write.",
+  "total_requests": 1000,
+  "read_ratio": 0,
+  "read_target_count": 100,
+  "read_repeat_mode": "unique",
+  "zipf_alpha": 0.0,
+  "size_profile": {
+    "small": 4096,
+    "medium": 8388608,
+    "large": 67108864
+  },
+  "size_mix": {
+    "small": 1,
+    "medium": 0,
+    "large": 0
+  },
+  "priority_policy": "uniform",
+  "uniform_priority": 0
+}

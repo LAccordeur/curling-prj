@@ -1,0 +1,21 @@
+{
+  "name": "read-only-reuse-extreme",
+  "description": "100% read. Read requests are concentrated on a small set of repeated targets to highlight reuse benefits.",
+  "total_requests": 300,
+  "read_ratio": 1,
+  "read_target_count": 10,
+  "read_repeat_mode": "zipf",
+  "zipf_alpha": 1.2,
+  "size_profile": {
+    "small": 4096,
+    "medium": 8388608,
+    "large": 268435456
+  },
+  "size_mix": {
+    "small": 0,
+    "medium": 0,
+    "large": 1
+  },
+  "priority_policy": "uniform",
+  "uniform_priority": 0
+}

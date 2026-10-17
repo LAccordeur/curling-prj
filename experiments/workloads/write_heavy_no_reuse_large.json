@@ -1,0 +1,21 @@
+{
+  "name": "write-heavy-no-reuse",
+  "description": "10% read, 90% write. Read targets are mostly unique to reduce reuse effects and isolate queue decoupling overheads.",
+  "total_requests": 1000,
+  "read_ratio": 0.1,
+  "read_target_count": 100,
+  "read_repeat_mode": "unique",
+  "zipf_alpha": 0.0,
+  "size_profile": {
+    "small": 4096,
+    "medium": 8388608,
+    "large": 67108864
+  },
+  "size_mix": {
+    "small": 0,
+    "medium": 0,
+    "large": 1
+  },
+  "priority_policy": "uniform",
+  "uniform_priority": 0
+}

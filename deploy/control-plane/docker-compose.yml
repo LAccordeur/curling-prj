@@ -1,0 +1,13 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: prototype-postgres
+    environment:
+      POSTGRES_DB: rme
+      POSTGRES_USER: rme
+      POSTGRES_PASSWORD: rme_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - ../../postgres/data:/var/lib/postgresql/data
+    restart: unless-stopped

@@ -1,0 +1,21 @@
+{
+  "name": "mixed",
+  "description": "50% read, 50% write. Read targets have moderate repetition to model a general exchange workload.",
+  "total_requests": 1000,
+  "read_ratio": 0.5,
+  "read_target_count": 100,
+  "read_repeat_mode": "zipf",
+  "zipf_alpha": 0.8,
+  "size_profile": {
+    "small": 4096,
+    "medium": 8388608,
+    "large": 67108864
+  },
+  "size_mix": {
+    "small": 1,
+    "medium": 0,
+    "large": 0
+  },
+  "priority_policy": "uniform",
+  "uniform_priority": 0
+}

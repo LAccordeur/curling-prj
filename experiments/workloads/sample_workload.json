@@ -1,0 +1,21 @@
+{
+  "name": "sample-mixed-workload",
+  "description": "Small sample workload config for generate_dataset.py.",
+  "total_requests": 100,
+  "read_ratio": 0.5,
+  "read_target_count": 10,
+  "read_repeat_mode": "zipf",
+  "zipf_alpha": 0.8,
+  "size_profile": {
+    "small": 1024,
+    "medium": 1048576,
+    "large": 10485760
+  },
+  "size_mix": {
+    "small": 0.7,
+    "medium": 0.2,
+    "large": 0.1
+  },
+  "priority_policy": "uniform",
+  "uniform_priority": 0
+}

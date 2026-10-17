@@ -1,0 +1,21 @@
+{
+  "name": "read-heavy-reuse",
+  "description": "90% read, 10% write. Read requests are concentrated on a small set of repeated targets to highlight reuse benefits.",
+  "total_requests": 1000,
+  "read_ratio": 0.9,
+  "read_target_count": 10,
+  "read_repeat_mode": "zipf",
+  "zipf_alpha": 1.2,
+  "size_profile": {
+    "small": 4096,
+    "medium": 8388608,
+    "large": 67108864
+  },
+  "size_mix": {
+    "small": 0.7,
+    "medium": 0.2,
+    "large": 0.1
+  },
+  "priority_policy": "uniform",
+  "uniform_priority": 0
+}
